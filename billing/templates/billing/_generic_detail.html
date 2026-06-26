@@ -12,26 +12,31 @@
     <div class="card-body p-4">
       <div class="row g-4 align-items-start">
 
-        <!-- Columna izquierda: imagen (solo si el modelo la tiene) -->
-        {% if has_image %}
-        <div class="col-12 col-md-5 text-center">
-          {% if object.image %}
-            <img src="{{ object.image.url }}" alt="{{ object }}"
-                 class="img-fluid rounded shadow-sm"
-                 style="max-height:380px;object-fit:contain;">
+        <!-- Columna izquierda: imagen o avatar de iniciales -->
+        <div class="col-12 col-md-4 text-center">
+          {% if has_image %}
+            {% if object.image %}
+              <img src="{{ object.image.url }}" alt="{{ object }}"
+                   class="img-fluid rounded shadow-sm"
+                   style="max-height:340px;object-fit:contain;">
+            {% else %}
+              <img src="{% static 'billing/no-image.svg' %}" alt="Sin imagen"
+                   class="img-fluid rounded shadow-sm border"
+                   style="max-height:340px;object-fit:contain;">
+            {% endif %}
           {% else %}
-            <img src="{% static 'billing/no-image.svg' %}" alt="Sin imagen"
-                 class="img-fluid rounded shadow-sm border"
-                 style="max-height:380px;object-fit:contain;">
+            <div class="rounded-circle bg-primary text-white d-inline-flex align-items-center justify-content-center shadow-sm"
+                 style="width:150px;height:150px;font-size:4rem;font-weight:700;">
+              {{ object|stringformat:'s'|slice:':1'|upper }}
+            </div>
           {% endif %}
         </div>
-        {% endif %}
 
         <!-- Columna derecha: datos -->
-        <div class="{% if has_image %}col-12 col-md-7{% else %}col-12{% endif %}">
+        <div class="col-12 col-md-8">
           <h3 class="fw-bold mb-1">{{ object }}</h3>
           {% if has_active %}
-          <p class="text-muted mb-3">
+          <p class="mb-3">
             {% if object.is_active %}
               <span class="badge bg-success">Activo</span>
             {% else %}
@@ -43,8 +48,8 @@
           <dl class="row mb-0">
             {% for r in detail_rows %}
               {% if r.label != 'Imagen' and r.label != 'Activo' %}
-              <dt class="col-sm-4 text-muted">{{ r.label }}</dt>
-              <dd class="col-sm-8">{{ r.value|default:"—" }}</dd>
+              <dt class="col-sm-4 text-muted py-1 border-bottom">{{ r.label }}</dt>
+              <dd class="col-sm-8 py-1 border-bottom mb-0">{{ r.value|default:"—" }}</dd>
               {% endif %}
             {% endfor %}
           </dl>

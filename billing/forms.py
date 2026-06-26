@@ -182,16 +182,31 @@ class InvoiceForm(forms.ModelForm):
         }
 
 
+class InvoiceDetailForm(forms.ModelForm):
+    """Línea de factura. Quita el initial del campo quantity para que las
+    filas vacías NO se consideren obligatorias (permite facturas con 1 solo
+    producto sin tener que llenar las demás filas)."""
+    class Meta:
+        model = InvoiceDetail
+        fields = ['product', 'quantity', 'unit_price']
+        widgets = {
+            'product': forms.Select(attrs={'class': 'form-select'}),
+            'quantity': forms.NumberInput(attrs={'class': 'form-control', 'min': 1}),
+            'unit_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # El default=1 del modelo se propaga como initial y marcaba las filas
+        # vacías como "cambiadas", forzando su validación. Lo limpiamos.
+        self.fields['quantity'].initial = None
+
+
 # Formset: permite agregar MÚLTIPLES detalles dentro de UNA factura
 InvoiceDetailFormSet = inlineformset_factory(
     Invoice,           # Modelo padre
     InvoiceDetail,     # Modelo hijo
-    fields=['product', 'quantity', 'unit_price'],
+    form=InvoiceDetailForm,
     extra=3,           # 3 filas vacías para agregar
     can_delete=True,   # Checkbox para eliminar filas
-    widgets={
-        'product': forms.Select(attrs={'class': 'form-select'}),
-        'quantity': forms.NumberInput(attrs={'class': 'form-control', 'min': 1}),
-        'unit_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-    },
 )

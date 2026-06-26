@@ -11,6 +11,7 @@ from .models import Purchase, PurchaseDetail
 from .forms import PurchaseForm, PurchaseDetailFormSet
 from shared.exports import export_excel, export_pdf
 from shared.columns import columns_context, get_visible_columns, visible_export
+from shared.money import compute_totals
 
 
 # === Columnas dinámicas de Compras (tabla + PDF + Excel) ===
@@ -117,10 +118,8 @@ def purchase_create(request):
                     product.save(update_fields=['stock'])
 
                 # Calcular totales
-                subtotal = sum(d.subtotal for d in purchase.details.all())
-                purchase.subtotal = subtotal
-                purchase.tax = subtotal * Decimal('0.15')   # IVA 15%
-                purchase.total = purchase.subtotal + purchase.tax
+                subtotal = sum((d.subtotal for d in purchase.details.all()), Decimal('0'))
+                purchase.subtotal, purchase.tax, purchase.total = compute_totals(subtotal)
                 purchase.save()
 
                 messages.success(request, f'¡Compra #{purchase.id} creada! Total: ${purchase.total}')
@@ -212,10 +211,8 @@ def purchase_update(request, pk):
                             product.save(update_fields=['stock'])
 
                     # Recalcular totales
-                    subtotal = sum(d.subtotal for d in purchase.details.all())
-                    purchase.subtotal = subtotal
-                    purchase.tax = subtotal * Decimal('0.15')   # IVA 15%
-                    purchase.total = purchase.subtotal + purchase.tax
+                    subtotal = sum((d.subtotal for d in purchase.details.all()), Decimal('0'))
+                    purchase.subtotal, purchase.tax, purchase.total = compute_totals(subtotal)
                     purchase.save()
 
                     messages.success(request, f'¡Compra #{purchase.id} actualizada! Stock ajustado.')

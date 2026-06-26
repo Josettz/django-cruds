@@ -23,6 +23,7 @@ from shared.mixins import (
 from shared.decorators import audit_action
 from shared.exports import export_excel, export_pdf
 from shared.columns import columns_context, get_visible_columns, visible_export
+from shared.money import compute_totals
 
 
 # === Columnas dinámicas de Facturas (tabla + PDF + Excel) ===
@@ -539,20 +540,50 @@ def invoice_create(request):
             if not has_detail:
                 messages.error(request, 'Debes agregar al menos un producto a la factura.')
             else:
-                invoice = form.save(commit=False)
-                invoice.save()
+                # Cantidad pedida por producto (sumando líneas repetidas)
+                needed = {}
+                for f in formset.forms:
+                    cd = f.cleaned_data
+                    if not cd or cd.get('DELETE'):
+                        continue
+                    p = cd.get('product')
+                    if not p:
+                        continue
+                    needed[p.id] = needed.get(p.id, 0) + cd.get('quantity', 0)
 
-                formset.instance = invoice
-                formset.save()
+                # Validar stock disponible ANTES de crear nada
+                faltante = None
+                for pid, qty in needed.items():
+                    prod = Product.objects.get(pk=pid)
+                    if prod.stock < qty:
+                        faltante = prod
+                        break
 
-                subtotal = sum(d.subtotal for d in invoice.details.all())
-                invoice.subtotal = subtotal
-                invoice.tax = subtotal * Decimal('0.15')  # IVA 15%
-                invoice.total = invoice.subtotal + invoice.tax
-                invoice.save()
+                if faltante is not None:
+                    messages.error(
+                        request,
+                        f'Stock insuficiente para "{faltante.name}": '
+                        f'hay {faltante.stock} y se piden {needed[faltante.id]}.'
+                    )
+                else:
+                    invoice = form.save(commit=False)
+                    invoice.save()
 
-                messages.success(request, f'¡Factura #{invoice.id} creada! Total: ${invoice.total}')
-                return redirect('billing:invoice_list')
+                    formset.instance = invoice
+                    formset.save()
+
+                    # Descontar stock vendido
+                    for pid, qty in needed.items():
+                        prod = Product.objects.get(pk=pid)
+                        prod.stock -= qty
+                        prod.save(update_fields=['stock'])
+
+                    subtotal = sum((d.subtotal for d in invoice.details.all()), Decimal('0'))
+                    invoice.subtotal, invoice.tax, invoice.total = compute_totals(subtotal)
+                    invoice.save()
+
+                    messages.success(request, f'¡Factura #{invoice.id} creada! Total: ${invoice.total}')
+                    return redirect('billing:invoice_list')
     else:
         form = InvoiceForm()
         formset = InvoiceDetailFormSet()
@@ -574,8 +605,10 @@ def invoice_create(request):
 
 @login_required
 def invoice_update(request, pk):
-    """Edita una factura existente y sus líneas; recalcula totales."""
-    invoice = get_object_or_404(Invoice, pk=pk)
+    """Edita una factura; ajusta el stock por la DIFERENCIA de cantidades vendidas."""
+    invoice = get_object_or_404(
+        Invoice.objects.prefetch_related('details__product'), pk=pk
+    )
 
     if request.method == 'POST':
         form = InvoiceForm(request.POST, instance=invoice)
@@ -590,18 +623,57 @@ def invoice_update(request, pk):
             if not has_detail:
                 messages.error(request, 'Debes agregar al menos un producto a la factura.')
             else:
-                invoice = form.save()
-                formset.instance = invoice
-                formset.save()
+                # Cantidades actuales (lo que esta factura YA restó del stock)
+                old_qty = {}
+                for d in invoice.details.all():
+                    old_qty[d.product_id] = old_qty.get(d.product_id, 0) + d.quantity
 
-                subtotal = sum(d.subtotal for d in invoice.details.all())
-                invoice.subtotal = subtotal
-                invoice.tax = subtotal * Decimal('0.15')  # IVA 15%
-                invoice.total = invoice.subtotal + invoice.tax
-                invoice.save()
+                # Cantidades nuevas según el formulario
+                new_qty = {}
+                for f in formset.forms:
+                    cd = f.cleaned_data
+                    if not cd or cd.get('DELETE'):
+                        continue
+                    p = cd.get('product')
+                    if not p:
+                        continue
+                    new_qty[p.id] = new_qty.get(p.id, 0) + cd.get('quantity', 0)
 
-                messages.success(request, f'¡Factura #{invoice.id} actualizada! Total: ${invoice.total}')
-                return redirect('billing:invoice_detail', pk=invoice.pk)
+                # Validar ANTES de guardar: una venta solo puede restar lo que hay.
+                # nuevo_stock = stock_actual + vendido_antes - vendido_ahora
+                faltante = None
+                for pid in set(old_qty) | set(new_qty):
+                    delta = new_qty.get(pid, 0) - old_qty.get(pid, 0)
+                    prod = Product.objects.get(pk=pid)
+                    if prod.stock - delta < 0:
+                        faltante = prod
+                        break
+
+                if faltante is not None:
+                    messages.error(
+                        request,
+                        f'Stock insuficiente para "{faltante.name}": '
+                        f'solo hay {faltante.stock} disponible(s).'
+                    )
+                else:
+                    invoice = form.save()
+                    formset.instance = invoice
+                    formset.save()
+
+                    # Aplicar el delta al stock (venta = resta)
+                    for pid in set(old_qty) | set(new_qty):
+                        delta = new_qty.get(pid, 0) - old_qty.get(pid, 0)
+                        if delta:
+                            prod = Product.objects.get(pk=pid)
+                            prod.stock -= delta
+                            prod.save(update_fields=['stock'])
+
+                    subtotal = sum((d.subtotal for d in invoice.details.all()), Decimal('0'))
+                    invoice.subtotal, invoice.tax, invoice.total = compute_totals(subtotal)
+                    invoice.save()
+
+                    messages.success(request, f'¡Factura #{invoice.id} actualizada! Total: ${invoice.total}')
+                    return redirect('billing:invoice_detail', pk=invoice.pk)
     else:
         form = InvoiceForm(instance=invoice)
         formset = InvoiceDetailFormSet(instance=invoice)
@@ -635,11 +707,19 @@ def invoice_detail(request, pk):
 
 @login_required
 def invoice_delete(request, pk):
-    """Elimina una factura y todos sus detalles (CASCADE)."""
-    invoice = get_object_or_404(Invoice, pk=pk)
+    """Elimina una factura y sus detalles (CASCADE); DEVUELVE el stock vendido."""
+    invoice = get_object_or_404(
+        Invoice.objects.prefetch_related('details__product'), pk=pk
+    )
     if request.method == 'POST':
         invoice_id = invoice.id
+        # Reponer el stock que esta factura había restado
+        for detail in invoice.details.all():
+            product = detail.product
+            product.stock += detail.quantity
+            product.save(update_fields=['stock'])
+
         invoice.delete()
-        messages.success(request, f'¡Factura #{invoice_id} eliminada!')
+        messages.success(request, f'¡Factura #{invoice_id} eliminada! Stock repuesto.')
         return redirect('billing:invoice_list')
     return render(request, 'billing/invoice_confirm_delete.html', {'object': invoice})
