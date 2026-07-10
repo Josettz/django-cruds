@@ -5,6 +5,33 @@ from django.urls import reverse
 from django.utils import timezone
 
 
+class GroupRequiredMixin:
+    """
+    Mixin que verifica si el usuario pertenece a uno o varios grupos (roles).
+    Si no pertenece a ninguno de los grupos requeridos, redirige con error.
+    """
+    group_required = []
+    group_redirect_url = '/'
+    group_error_message = 'No tienes permiso para acceder a esta sección.'
+
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+        if request.user.is_superuser:
+            return super().dispatch(request, *args, **kwargs)
+        if not self.group_required:
+            return super().dispatch(request, *args, **kwargs)
+        user_groups = set(request.user.groups.values_list('name', flat=True))
+        if not any(g in user_groups for g in self.group_required):
+            messages.error(request, self.group_error_message)
+            return redirect(self.group_redirect_url)
+        return super().dispatch(request, *args, **kwargs)
+
+    def handle_no_permission(self):
+        from django.contrib.auth.views import redirect_to_login
+        return redirect_to_login(self.request.get_full_path())
+
+
 class StaffRequiredMixin:
     """
     Mixin que verifica si el usuario es miembro del staff.

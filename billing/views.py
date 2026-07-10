@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.utils import timezone
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -566,21 +567,33 @@ def invoice_create(request):
                         f'hay {faltante.stock} y se piden {needed[faltante.id]}.'
                     )
                 else:
-                    invoice = form.save(commit=False)
-                    invoice.save()
+                    with transaction.atomic():
+                        # Calcular subtotal desde los datos del formset ANTES de guardar
+                        subtotal = Decimal('0')
+                        for f in formset.forms:
+                            cd = f.cleaned_data
+                            if not cd or cd.get('DELETE'):
+                                continue
+                            qty = cd.get('quantity', 0)
+                            price = cd.get('unit_price', 0)
+                            subtotal += qty * price
 
-                    formset.instance = invoice
-                    formset.save()
+                        subtotal, tax, total = compute_totals(subtotal)
 
-                    # Descontar stock vendido
-                    for pid, qty in needed.items():
-                        prod = Product.objects.get(pk=pid)
-                        prod.stock -= qty
-                        prod.save(update_fields=['stock'])
+                        invoice = form.save(commit=False)
+                        invoice.subtotal = subtotal
+                        invoice.tax = tax
+                        invoice.total = total
+                        invoice.save()
 
-                    subtotal = sum((d.subtotal for d in invoice.details.all()), Decimal('0'))
-                    invoice.subtotal, invoice.tax, invoice.total = compute_totals(subtotal)
-                    invoice.save()
+                        formset.instance = invoice
+                        formset.save()
+
+                        # Descontar stock vendido
+                        for pid, qty in needed.items():
+                            prod = Product.objects.get(pk=pid)
+                            prod.stock -= qty
+                            prod.save(update_fields=['stock'])
 
                     messages.success(request, f'¡Factura #{invoice.id} creada! Total: ${invoice.total}')
                     return redirect('billing:invoice_list')
@@ -656,21 +669,35 @@ def invoice_update(request, pk):
                         f'solo hay {faltante.stock} disponible(s).'
                     )
                 else:
-                    invoice = form.save()
-                    formset.instance = invoice
-                    formset.save()
+                    with transaction.atomic():
+                        # Calcular nuevo subtotal desde los datos del formset
+                        subtotal = Decimal('0')
+                        for f in formset.forms:
+                            cd = f.cleaned_data
+                            if not cd or cd.get('DELETE'):
+                                continue
+                            qty = cd.get('quantity', 0)
+                            price = cd.get('unit_price', 0)
+                            subtotal += qty * price
 
-                    # Aplicar el delta al stock (venta = resta)
-                    for pid in set(old_qty) | set(new_qty):
-                        delta = new_qty.get(pid, 0) - old_qty.get(pid, 0)
-                        if delta:
-                            prod = Product.objects.get(pk=pid)
-                            prod.stock -= delta
-                            prod.save(update_fields=['stock'])
+                        subtotal, tax, total = compute_totals(subtotal)
 
-                    subtotal = sum((d.subtotal for d in invoice.details.all()), Decimal('0'))
-                    invoice.subtotal, invoice.tax, invoice.total = compute_totals(subtotal)
-                    invoice.save()
+                        invoice = form.save(commit=False)
+                        invoice.subtotal = subtotal
+                        invoice.tax = tax
+                        invoice.total = total
+                        invoice.save()
+
+                        formset.instance = invoice
+                        formset.save()
+
+                        # Aplicar el delta al stock (venta = resta)
+                        for pid in set(old_qty) | set(new_qty):
+                            delta = new_qty.get(pid, 0) - old_qty.get(pid, 0)
+                            if delta:
+                                prod = Product.objects.get(pk=pid)
+                                prod.stock -= delta
+                                prod.save(update_fields=['stock'])
 
                     messages.success(request, f'¡Factura #{invoice.id} actualizada! Total: ${invoice.total}')
                     return redirect('billing:invoice_detail', pk=invoice.pk)
@@ -712,14 +739,15 @@ def invoice_delete(request, pk):
         Invoice.objects.prefetch_related('details__product'), pk=pk
     )
     if request.method == 'POST':
-        invoice_id = invoice.id
-        # Reponer el stock que esta factura había restado
-        for detail in invoice.details.all():
-            product = detail.product
-            product.stock += detail.quantity
-            product.save(update_fields=['stock'])
+        with transaction.atomic():
+            invoice_id = invoice.id
+            # Reponer el stock que esta factura había restado
+            for detail in invoice.details.all():
+                product = detail.product
+                product.stock += detail.quantity
+                product.save(update_fields=['stock'])
 
-        invoice.delete()
+            invoice.delete()
         messages.success(request, f'¡Factura #{invoice_id} eliminada! Stock repuesto.')
         return redirect('billing:invoice_list')
     return render(request, 'billing/invoice_confirm_delete.html', {'object': invoice})

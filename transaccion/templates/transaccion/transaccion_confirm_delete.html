@@ -1,0 +1,33 @@
+{% extends 'billing/base.html' %}
+{% block title %}Eliminar Transacción{% endblock %}
+{% block content %}
+<div class="card shadow border-0">
+  <div class="card-header bg-danger text-white">
+    <h4 class="mb-0">Confirmar eliminación</h4>
+  </div>
+  <div class="card-body">
+    <p class="fs-5">¿Estás seguro de eliminar la transacción <strong>#{{ object.id }}</strong>?</p>
+    <table class="table table-bordered">
+      <tr><th>Tipo</th><td>{% if object.tipo == 'ingreso' %}Ingreso (Venta){% else %}Egreso (Compra){% endif %}</td></tr>
+      <tr><th>Descripción</th><td>{{ object.descripcion }}</td></tr>
+      <tr><th>Subtotal</th><td>${{ object.subtotal }}</td></tr>
+      <tr><th>IVA</th><td>${{ object.iva }}</td></tr>
+      <tr><th>Total</th><td class="fw-bold">${{ object.total }}</td></tr>
+      {% if object.detalles.exists %}
+      <tr>
+        <th>Productos</th>
+        <td>
+          {% for d in object.detalles.all %}{{ d.product.name }} x{{ d.quantity }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        </td>
+      </tr>
+      {% endif %}
+      <tr><th>Fecha</th><td>{{ object.fecha|date:"d/m/Y H:i" }}</td></tr>
+    </table>
+    <form method="post">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-danger">Sí, eliminar</button>
+      <a href="{% url 'transaccion_list' %}" class="btn btn-secondary">Cancelar</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends 'billing/base.html' %}
+{% block title %}Transacciones{% endblock %}
+{% block content %}
+<h2>Transacciones</h2>
+<div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
+  <a href="{% url 'transaccion_create' %}" class="btn btn-primary">+ Nueva Transacción</a>
+</div>
+
+<table class="table table-striped table-hover">
+  <thead class="table-dark">
+    <tr>
+      <th>#</th>
+      <th>Tipo</th>
+      <th>Descripción</th>
+      <th class="text-end">Subtotal</th>
+      <th class="text-end">IVA</th>
+      <th class="text-end">Total</th>
+      <th>Fecha</th>
+      <th>Acciones</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in transacciones %}
+    <tr>
+      <td>{{ t.id }}</td>
+      <td>
+        {% if t.tipo == 'ingreso' %}
+          <span class="badge bg-success">INGRESO</span>
+          <small class="text-success ms-1">Venta</small>
+        {% else %}
+          <span class="badge bg-danger">EGRESO</span>
+          <small class="text-danger ms-1">Compra</small>
+        {% endif %}
+      </td>
+      <td>{{ t.descripcion }}</td>
+      <td class="text-end">${{ t.subtotal|floatformat:2 }}</td>
+      <td class="text-end">${{ t.iva|floatformat:2 }}</td>
+      <td class="text-end fw-bold">${{ t.total|floatformat:2 }}</td>
+      <td>{{ t.fecha|date:"d/m/Y" }}</td>
+      <td>
+        <a href="{% url 'transaccion_detail' t.pk %}" class="btn btn-sm btn-info">Ver</a>
+        <a href="{% url 'transaccion_update' t.pk %}" class="btn btn-sm btn-warning">Editar</a>
+        <a href="{% url 'transaccion_delete' t.pk %}" class="btn btn-sm btn-danger">Eliminar</a>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="8" class="text-center">Aún no hay transacciones.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

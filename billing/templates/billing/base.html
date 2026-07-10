@@ -24,6 +24,20 @@
         <li class="nav-item"><a class="nav-link" href="{% url 'billing:customer_list' %}">Clientes</a></li>
         <li class="nav-item"><a class="nav-link" href="{% url 'billing:invoice_list' %}">Facturas</a></li>
         <li class="nav-item"><a class="nav-link" href="{% url 'purchasing:purchase_list' %}">Compras</a></li>
+        <li class="nav-item"><a class="nav-link" href="{% url 'transaccion_list' %}">Transacciones</a></li>
+        <li class="nav-item"><a class="nav-link" href="{% url 'empleados:list' %}">Empleados</a></li>
+        <li class="nav-item"><a class="nav-link" href="{% url 'tareas:list' %}">Tareas</a></li>
+          {% load security_tags %}
+          {% if user|has_group:'Administrador' %}
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Admin</a>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="{% url 'security:user_list' %}">Usuarios</a></li>
+              <li><a class="dropdown-item" href="{% url 'security:group_list' %}">Roles</a></li>
+              <li><a class="dropdown-item" href="{% url 'security:permission_list' %}">Permisos</a></li>
+            </ul>
+          </li>
+          {% endif %}
         {% endif %}
       </ul>
       <ul class="navbar-nav">

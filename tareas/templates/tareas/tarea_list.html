@@ -1,0 +1,42 @@
+{% extends 'billing/base.html' %}
+{% block content %}
+<h2>Tareas</h2>
+<a href="{% url 'tareas:create' %}" class="btn btn-primary mb-3">Nueva tarea</a>
+<table class="table">
+  <thead>
+    <tr>
+      <th>Título</th>
+      <th>Asignado a</th>
+      <th>Prioridad</th>
+      <th>Completada</th>
+      <th>Vence</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in tareas %}
+    <tr>
+      <td>{{ t.titulo }}</td>
+      <td>{{ t.empleado.apellido }}, {{ t.empleado.nombre }}</td>
+      <td>
+        {% if t.prioridad == 'alta' %}
+          <span class="badge bg-danger">Alta</span>
+        {% elif t.prioridad == 'media' %}
+          <span class="badge bg-warning text-dark">Media</span>
+        {% else %}
+          <span class="badge bg-success">Baja</span>
+        {% endif %}
+      </td>
+      <td>{{ t.completada|yesno:"Sí,No" }}</td>
+      <td>{{ t.fecha_vencimiento|date:"d/m/Y"|default:"—" }}</td>
+      <td>
+        <a href="{% url 'tareas:update' t.pk %}">Editar</a> |
+        <a href="{% url 'tareas:delete' t.pk %}">Eliminar</a>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="6">No hay tareas registradas.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends 'billing/base.html' %}
+{% block content %}
+<h2>¿Eliminar tarea: "{{ object.titulo }}"?</h2>
+<p>Asignada a: {{ object.empleado }}</p>
+<form method="post">
+  {% csrf_token %}
+  <button type="submit" class="btn btn-danger">Sí, eliminar</button>
+  <a href="{% url 'tareas:list' %}" class="btn btn-secondary">Cancelar</a>
+</form>
+{% endblock %}

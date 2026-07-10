@@ -5,6 +5,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
+from django.db import transaction
 
 from billing.models import Product, Supplier
 from .models import Purchase, PurchaseDetail
@@ -105,22 +106,33 @@ def purchase_create(request):
             if not has_detail:
                 messages.error(request, 'Debes agregar al menos un producto a la compra.')
             else:
-                purchase = form.save(commit=False)
-                purchase.save()
+                with transaction.atomic():
+                        # Calcular subtotal desde los datos del formset ANTES de guardar
+                        subtotal = Decimal('0')
+                        for f in formset.forms:
+                            cd = f.cleaned_data
+                            if not cd or cd.get('DELETE'):
+                                continue
+                            qty = cd.get('quantity', 0)
+                            cost = cd.get('unit_cost', 0)
+                            subtotal += qty * cost
 
-                formset.instance = purchase
-                details = formset.save()          # guarda las líneas
+                        subtotal, tax, total = compute_totals(subtotal)
 
-                # Sumar stock por cada línea comprada
-                for detail in details:
-                    product = detail.product
-                    product.stock += detail.quantity
-                    product.save(update_fields=['stock'])
+                        purchase = form.save(commit=False)
+                        purchase.subtotal = subtotal
+                        purchase.tax = tax
+                        purchase.total = total
+                        purchase.save()
 
-                # Calcular totales
-                subtotal = sum((d.subtotal for d in purchase.details.all()), Decimal('0'))
-                purchase.subtotal, purchase.tax, purchase.total = compute_totals(subtotal)
-                purchase.save()
+                        formset.instance = purchase
+                        details = formset.save()
+
+                        # Sumar stock por cada línea comprada
+                        for detail in details:
+                            product = detail.product
+                            product.stock += detail.quantity
+                            product.save(update_fields=['stock'])
 
                 messages.success(request, f'¡Compra #{purchase.id} creada! Total: ${purchase.total}')
                 return redirect('purchasing:purchase_list')
@@ -198,22 +210,35 @@ def purchase_update(request, pk):
                         f'negativo (hay {negativo.stock}). Probablemente ya se vendió.'
                     )
                 else:
-                    purchase = form.save()
-                    formset.instance = purchase
-                    formset.save()
+                    with transaction.atomic():
+                        # Calcular nuevo subtotal desde los datos del formset
+                        subtotal = Decimal('0')
+                        for f in formset.forms:
+                            cd = f.cleaned_data
+                            if not cd or cd.get('DELETE'):
+                                continue
+                            qty = cd.get('quantity', 0)
+                            cost = cd.get('unit_cost', 0)
+                            subtotal += qty * cost
 
-                    # Aplicar el delta de stock por producto
-                    for pid in set(old_qty) | set(new_qty):
-                        delta = new_qty.get(pid, 0) - old_qty.get(pid, 0)
-                        if delta:
-                            product = Product.objects.get(pk=pid)
-                            product.stock += delta
-                            product.save(update_fields=['stock'])
+                        subtotal, tax, total = compute_totals(subtotal)
 
-                    # Recalcular totales
-                    subtotal = sum((d.subtotal for d in purchase.details.all()), Decimal('0'))
-                    purchase.subtotal, purchase.tax, purchase.total = compute_totals(subtotal)
-                    purchase.save()
+                        purchase = form.save(commit=False)
+                        purchase.subtotal = subtotal
+                        purchase.tax = tax
+                        purchase.total = total
+                        purchase.save()
+
+                        formset.instance = purchase
+                        formset.save()
+
+                        # Aplicar el delta de stock por producto
+                        for pid in set(old_qty) | set(new_qty):
+                            delta = new_qty.get(pid, 0) - old_qty.get(pid, 0)
+                            if delta:
+                                product = Product.objects.get(pk=pid)
+                                product.stock += delta
+                                product.save(update_fields=['stock'])
 
                     messages.success(request, f'¡Compra #{purchase.id} actualizada! Stock ajustado.')
                     return redirect('purchasing:purchase_detail', pk=purchase.pk)
@@ -271,14 +296,15 @@ def purchase_delete(request, pk):
                 )
                 return redirect('purchasing:purchase_detail', pk=purchase.pk)
 
-        # Revertir stock y borrar
-        purchase_id = purchase.id
-        for detail in purchase.details.all():
-            product = detail.product
-            product.stock -= detail.quantity
-            product.save(update_fields=['stock'])
+        with transaction.atomic():
+            # Revertir stock y borrar
+            purchase_id = purchase.id
+            for detail in purchase.details.all():
+                product = detail.product
+                product.stock -= detail.quantity
+                product.save(update_fields=['stock'])
 
-        purchase.delete()
+            purchase.delete()
         messages.success(request, f'¡Compra #{purchase_id} eliminada! Stock revertido.')
         return redirect('purchasing:purchase_list')
 
